@@ -1,0 +1,6 @@
+target
+script/data/result.txt
+script/data/encryption_info.json
+script/data/decryption_info.json
+script/data/batch_decryption_info.data
+/data

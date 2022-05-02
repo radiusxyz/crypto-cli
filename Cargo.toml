@@ -1,0 +1,22 @@
+[package]
+name = "crypto_cli"
+version = "0.0.1"
+edition = "2021"
+description = "A command-line interface (CLI) to use Verifiable Delay Function (VDF) & Poseidon Encryption using zkp"
+repository = ""
+license = "Apache-2.0"
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+hex = "0.4.3"
+clap = { version = "3.1.6", features = ["derive"] }
+dusk-plonk = {version="0.10", default-features = false, features = ["alloc"]}
+dusk-bytes = "0.1"
+sapling-crypto = { package = "sapling-crypto_ce", git = "https://github.com/matter-labs-archive/sapling-crypto" }
+
+encryptor = { git = "https://github.com/radiusxyz/encryptor" }
+encryptor_zkp = { package = "encryptor_zkp", git = "https://github.com/radiusxyz/encryptor-zkp" }
+
+vdf = { git = "https://github.com/radiusxyz/vdf" }
+vdf_zkp = { package = "vdf_zkp", git = "https://github.com/radiusxyz/vdf-zkp" }
