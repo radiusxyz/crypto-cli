@@ -15,6 +15,11 @@ use std::io::{BufRead, BufReader};
 use std::thread;
 use vdf::{ReturnData, VDF};
 use vdf_zkp::VdfZKP;
+use sapling_crypto::group_hash::BlakeHasher;
+use sapling_crypto::poseidon::bn256::Bn256PoseidonParams;
+use sapling_crypto::bellman::pairing::ff::PrimeField;
+use sapling_crypto::poseidon::poseidon_hash;
+use sapling_crypto::bellman::pairing::ff::to_hex;
 
 fn main() {
   let args = Args::parse();
@@ -40,11 +45,17 @@ fn main() {
     let (cipher_text_hexes, nonce, message_scalar, cipher_scalar) = poseidon_encryption.encrypt(encryption_info.plain_text, symmetric_key);
 
     let mut vdf_proof_hex = "".to_string();
+    
+    let hash_params = Bn256PoseidonParams::new::<BlakeHasher>();
+    let expected_commitment = PrimeField::from_str(y_string.as_str()).unwrap();
+    let commitment = poseidon_hash::<Bn256>(&hash_params, &[expected_commitment])[0];
+    let commitment_hex = to_hex(&commitment);
+    
     if args.use_vdf_zkp == true {
       let mut vdf_zkp = VdfZKP::<Bn256>::new();
       vdf_zkp.import_parameter();
 
-      let vdf_proof = vdf_zkp.generate_proof(
+      let vdf_proof = vdf_zkp.generate_proof(hash_params,
         params.remainder.as_str(),
         params.p_minus_one.as_str(),
         params.q_minus_one.as_str(),
@@ -80,6 +91,7 @@ fn main() {
         "{{
           \"message_length\": {}, 
           \"nonce\": \"{:?}\", 
+          \"commitment\": {:?},
           \"g\": {:?}, 
           \"t\": {:?}, 
           \"two_two_t\": {:?},
@@ -88,13 +100,14 @@ fn main() {
           \"vdf_proof\": {:?},
           \"encryption_proof\": {:?}
         }}",
-        message_length, nonce, params.g, t, params.two_two_t, params.n, cipher_text_hexes, vdf_proof_hex, encryption_proof_hex
+        message_length, nonce, commitment_hex, params.g, t, params.two_two_t, params.n, cipher_text_hexes, vdf_proof_hex, encryption_proof_hex
       );
     } else if args.use_vdf_zkp == true {
       println!(
         "{{
           \"message_length\": {}, 
           \"nonce\": \"{:?}\", 
+          \"commitment\": {:?},
           \"g\": {:?}, 
           \"t\": {:?}, 
           \"two_two_t\": {:?},
@@ -102,13 +115,14 @@ fn main() {
           \"cipher_text\": {:?}, 
           \"vdf_proof\": {:?}
         }}",
-        message_length, nonce, params.g, t, params.two_two_t, params.n, cipher_text_hexes, vdf_proof_hex
+        message_length, nonce, commitment_hex, params.g, t, params.two_two_t, params.n, cipher_text_hexes, vdf_proof_hex
       );
     } else if args.use_encryption_zkp == true {
       println!(
         "{{
           \"message_length\": {}, 
           \"nonce\": \"{:?}\", 
+          \"commitment\": {:?},
           \"g\": {:?}, 
           \"t\": {:?}, 
           \"two_two_t\": {:?},
@@ -116,7 +130,7 @@ fn main() {
           \"cipher_text\": {:?}, 
           \"encryption_proof\": {:?}
         }}",
-        message_length, nonce, params.g, t, params.two_two_t, params.n, cipher_text_hexes, encryption_proof_hex
+        message_length, nonce, commitment_hex, params.g, t, params.two_two_t, params.n, cipher_text_hexes, encryption_proof_hex
       );
     } else {
       println!(
@@ -138,6 +152,7 @@ fn main() {
     let t = decryption_info.t;
     let g = decryption_info.g.clone();
     let n = decryption_info.n.clone();
+    let commitment = decryption_info.commitment.clone();
 
     if args.use_vdf_zkp == true {
       let mut vdf_zkp = VdfZKP::<Bn256>::new();
@@ -146,7 +161,7 @@ fn main() {
       let vdf_proof_vector = hex::decode(&decryption_info.vdf_proof).unwrap();
       let vdf_proof = groth16::Proof::<Bn256>::read(&vdf_proof_vector[..]).unwrap();
 
-      let is_verified = vdf_zkp.verify(vdf_proof, decryption_info.two_two_t.as_str(), decryption_info.g.as_str(), decryption_info.n.as_str());
+      let is_verified = vdf_zkp.verify(vdf_proof, commitment.as_str(), decryption_info.two_two_t.as_str(), decryption_info.g.as_str(), decryption_info.n.as_str());
       if is_verified == false {
         println!("VDF proof is invalid");
         return;
@@ -199,6 +214,7 @@ fn main() {
       let t = decryption_info.t.clone();
       let g = decryption_info.g.clone();
       let n = decryption_info.n.clone();
+      let commitment = decryption_info.commitment.clone();
 
       if args.use_thread == true {
         let vdf_proof = decryption_info.vdf_proof.clone();
@@ -216,7 +232,7 @@ fn main() {
             let vdf_proof_vector = hex::decode(&vdf_proof).unwrap();
             let vdf_proof = groth16::Proof::<Bn256>::read(&vdf_proof_vector[..]).unwrap();
 
-            let is_verified = vdf_zkp.verify(vdf_proof, two_two_t.as_str(), g.as_str(), n.as_str());
+            let is_verified = vdf_zkp.verify(vdf_proof, commitment.as_str(), two_two_t.as_str(), g.as_str(), n.as_str());
 
             if is_verified == false {
               println!("VDF proof is invalid");
@@ -262,7 +278,7 @@ fn main() {
           let vdf_proof_vector = hex::decode(&decryption_info.vdf_proof).unwrap();
           let vdf_proof = groth16::Proof::<Bn256>::read(&vdf_proof_vector[..]).unwrap();
 
-          let is_verified = vdf_zkp.verify(vdf_proof, decryption_info.two_two_t.as_str(), decryption_info.g.as_str(), decryption_info.n.as_str());
+          let is_verified = vdf_zkp.verify(vdf_proof, commitment.as_str(), decryption_info.two_two_t.as_str(), decryption_info.g.as_str(), decryption_info.n.as_str());
 
           if is_verified == false {
             println!("VDF proof is invalid");

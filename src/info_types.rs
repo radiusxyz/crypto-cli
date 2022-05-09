@@ -18,6 +18,9 @@ pub struct DecryptionInfo {
   pub nonce: String,
 
   #[serde(default)]
+  pub commitment: String,
+
+  #[serde(default)]
   pub g: String,
 
   #[serde(default)]
