@@ -4,7 +4,7 @@ SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 data=`cat $SCRIPTPATH/data/encryption_info.json`
 
 use_vdf_zkp=true
-use_encryption_zkp=true
+use_encryption_zkp=false
 
 echo "### Start encryption ###"
 echo "- Use vdf zkp: $use_vdf_zkp"

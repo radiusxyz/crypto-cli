@@ -1,5 +1,6 @@
-use std::str;
+use std::str::{self, FromStr};
 mod arguments;
+use num_bigint::BigUint;
 mod info_types;
 use arguments::Args;
 use clap::Parser;
@@ -8,66 +9,69 @@ use dusk_plonk::prelude::*;
 use encryptor::PoseidonEncryption;
 use encryptor_zkp::PoseidonCircuit;
 use info_types::{DecryptionInfo, EncryptionInfo};
-use sapling_crypto::bellman::groth16;
-use sapling_crypto::bellman::pairing::bn256::Bn256;
+use sapling_crypto::bellman::pairing::bls12_381::Bls12;
+use sapling_crypto::bellman::pairing::ff::from_hex;
+use sapling_crypto::bellman::pairing::ff::to_hex;
+use sapling_crypto::bellman::pairing::ff::ScalarEngine;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::thread;
-use vdf::{ReturnData, VDF};
-use vdf_zkp::VdfZKP;
-use sapling_crypto::group_hash::BlakeHasher;
-use sapling_crypto::poseidon::bn256::Bn256PoseidonParams;
-use sapling_crypto::bellman::pairing::ff::PrimeField;
-use sapling_crypto::poseidon::poseidon_hash;
-use sapling_crypto::bellman::pairing::ff::to_hex;
+use vdf_zkp::mimc;
+use vdf_zkp::{nat_to_f, VdfProof, VdfZKP};
+
+macro_rules! init_big_uint_from_str {
+  ($var:ident, $val:expr) => {
+    let $var = BigUint::from_str($val).unwrap();
+  };
+}
 
 fn main() {
   let args = Args::parse();
-  let vdf: VDF = VDF::new(64, 10);
   let label = b"poseidon-cipher";
 
   if args.action_type == "encrypt" {
+    let mut vdf_zkp = VdfZKP::<Bls12>::new();
+    vdf_zkp.import_parameter();
+    let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
+
+    init_big_uint_from_str!(g_two_t, vdf_params.g_two_t.as_str());
+    init_big_uint_from_str!(n, vdf_params.n.as_str());
+
     let encryption_info: EncryptionInfo = serde_json::from_str(&args.data).unwrap();
 
     let message_bytes = encryption_info.plain_text.as_bytes();
     let message_length = message_bytes.len();
     let poseidon_encryption = PoseidonEncryption::new();
 
-    let t = encryption_info.t.parse::<u64>().unwrap();
-    let params = vdf.setup(t);
-    let params: ReturnData = serde_json::from_str(params.as_str()).unwrap();
+    let s: u128 = fastrand::u128(..);
+    let s = BigUint::from(s);
+    let s2 = g_two_t.modpow(&s, &n);
+    let s2_field = nat_to_f::<<Bls12 as ScalarEngine>::Fr>(&s2).unwrap();
+    let commitment = mimc::helper::mimc(&[s2_field.clone(), s2_field.clone()]);
+    let commitment_hex = to_hex(&commitment);
 
-    let y_string = vdf.evaluate_with_trapdoor(t, params.g.clone(), params.n.clone(), params.remainder.clone());
-
-    let y = y_string.as_bytes();
-    let symmetric_key = PoseidonEncryption::calculate_secret_key(&y);
+    let symmetric_key = PoseidonEncryption::calculate_secret_key(s2.to_string().as_bytes());
 
     let (cipher_text_hexes, nonce, message_scalar, cipher_scalar) = poseidon_encryption.encrypt(encryption_info.plain_text, symmetric_key);
 
     let mut vdf_proof_hex = "".to_string();
-    
-    let hash_params = Bn256PoseidonParams::new::<BlakeHasher>();
-    let expected_commitment = PrimeField::from_str(y_string.as_str()).unwrap();
-    let commitment = poseidon_hash::<Bn256>(&hash_params, &[expected_commitment])[0];
-    let commitment_hex = to_hex(&commitment);
-    
-    if args.use_vdf_zkp == true {
-      let mut vdf_zkp = VdfZKP::<Bn256>::new();
-      vdf_zkp.import_parameter();
+    let mut r1 = "".to_string();
+    let mut r3 = "".to_string();
+    let mut s1 = "".to_string();
+    let mut s3 = "".to_string();
+    let mut k = "".to_string();
 
-      let vdf_proof = vdf_zkp.generate_proof(hash_params,
-        params.remainder.as_str(),
-        params.p_minus_one.as_str(),
-        params.q_minus_one.as_str(),
-        params.quotient.as_str(),
-        params.remainder.as_str(),
-        params.g.as_str(),
-        y_string.as_str(),
-      );
+    if args.use_vdf_zkp == true {
+      let vdf_proof = vdf_zkp.generate_proof(commitment, s.to_string().as_str());
+
+      r1 = vdf_proof.sigma_proof.r1.to_string();
+      r3 = vdf_proof.sigma_proof.r3.to_string();
+      s1 = vdf_proof.sigma_proof.s1.to_string();
+      s3 = vdf_proof.sigma_proof.s3.to_string();
+      k = vdf_proof.sigma_proof.k.to_string();
 
       let mut vdf_proof_vector = vec![];
-      vdf_proof.write(&mut vdf_proof_vector).unwrap();
-
+      vdf_proof.snark_proof.write(&mut vdf_proof_vector).unwrap();
       vdf_proof_hex = hex::encode(vdf_proof_vector.clone());
     }
 
@@ -80,7 +84,10 @@ fn main() {
       let prover_key = poseidon_circuit.prover_key.clone().unwrap();
       let label = b"poseidon-cipher";
 
-      poseidon_circuit.set_input(symmetric_key, nonce, &message_scalar[..], &cipher_scalar[..]);
+      let commitment = commitment_hex.as_bytes();
+      let commitment: BlsScalar = BlsScalar::from_slice(commitment).unwrap();
+
+      poseidon_circuit.set_input(symmetric_key, commitment, nonce, &message_scalar[..], &cipher_scalar[..]);
 
       let proof = poseidon_circuit.prove(&public_parameter, &prover_key, label).unwrap();
       encryption_proof_hex = hex::encode(proof.to_bytes());
@@ -92,76 +99,52 @@ fn main() {
           \"message_length\": {}, 
           \"nonce\": \"{:?}\", 
           \"commitment\": {:?},
-          \"g\": {:?}, 
-          \"t\": {:?}, 
-          \"two_two_t\": {:?},
-          \"n\": {:?}, 
           \"cipher_text\": {:?}, 
-          \"vdf_proof\": {:?},
+          
+          \"r1\": {:?},
+          \"r3\": {:?},
+          \"s1\": {:?},
+          \"s3\": {:?},
+          \"k\": {:?},
+          \"vdf_snark_proof\": {:?},
+
           \"encryption_proof\": {:?}
         }}",
-        message_length, nonce, commitment_hex, params.g, t, params.two_two_t, params.n, cipher_text_hexes, vdf_proof_hex, encryption_proof_hex
+        message_length, nonce, commitment_hex, cipher_text_hexes, r1, r3, s1, s3, k, vdf_proof_hex, encryption_proof_hex,
       );
     } else if args.use_vdf_zkp == true {
       println!(
-        "{{
-          \"message_length\": {}, 
-          \"nonce\": \"{:?}\", 
-          \"commitment\": {:?},
-          \"g\": {:?}, 
-          \"t\": {:?}, 
-          \"two_two_t\": {:?},
-          \"n\": {:?}, 
-          \"cipher_text\": {:?}, 
-          \"vdf_proof\": {:?}
-        }}",
-        message_length, nonce, commitment_hex, params.g, t, params.two_two_t, params.n, cipher_text_hexes, vdf_proof_hex
+        "{{\"message_length\": {}, \"nonce\": \"{:?}\", \"commitment\": {:?}, \"cipher_text\": {:?}, \"r1\": {:?}, \"r3\": {:?}, \"s1\": {:?}, \"s3\": {:?}, \"k\": {:?}, \"vdf_snark_proof\": {:?} }}",
+        message_length, nonce, commitment_hex, cipher_text_hexes, r1, r3, s1, s3, k, vdf_proof_hex
       );
     } else if args.use_encryption_zkp == true {
       println!(
-        "{{
-          \"message_length\": {}, 
-          \"nonce\": \"{:?}\", 
-          \"commitment\": {:?},
-          \"g\": {:?}, 
-          \"t\": {:?}, 
-          \"two_two_t\": {:?},
-          \"n\": {:?}, 
-          \"cipher_text\": {:?}, 
-          \"encryption_proof\": {:?}
-        }}",
-        message_length, nonce, commitment_hex, params.g, t, params.two_two_t, params.n, cipher_text_hexes, encryption_proof_hex
+        "{{\"message_length\": {}, \"nonce\": \"{:?}\", \"commitment\": {:?},\"cipher_text\": {:?}, \"encryption_proof\": {:?}}}",
+        message_length, nonce, commitment_hex, cipher_text_hexes, encryption_proof_hex
       );
     } else {
-      println!(
-        "{{
-        \"message_length\": {}, 
-        \"nonce\": \"{:?}\", 
-        \"g\": {:?}, 
-        \"t\": {:?}, 
-        \"two_two_t\": {:?},
-        \"n\": {:?}, 
-        \"cipher_text\": {:?}
-      }}",
-        message_length, nonce, params.g, t, params.two_two_t, params.n, cipher_text_hexes
-      );
+      println!("{{\"message_length\": {}, \"nonce\": \"{:?}\", \"cipher_text\": {:?}}}", message_length, nonce, cipher_text_hexes);
     }
   } else if args.action_type == "decrypt" {
+    let mut vdf_zkp = VdfZKP::<Bls12>::new();
+    vdf_zkp.import_parameter();
+    let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
+
     let decryption_info: DecryptionInfo = serde_json::from_str(&args.data).unwrap();
     let poseidon_encryption = PoseidonEncryption::new();
-    let t = decryption_info.t;
-    let g = decryption_info.g.clone();
-    let n = decryption_info.n.clone();
-    let commitment = decryption_info.commitment.clone();
+    let commitment_hex = decryption_info.commitment.clone();
 
     if args.use_vdf_zkp == true {
-      let mut vdf_zkp = VdfZKP::<Bn256>::new();
-      vdf_zkp.import_parameter();
+      let r1 = decryption_info.r1.as_str();
+      let r3 = decryption_info.r3.as_str();
+      let s1 = decryption_info.s1.as_str();
+      let s3 = decryption_info.s3.as_str();
+      let k = decryption_info.k.as_str();
+      let vdf_proof_vector = hex::decode(&decryption_info.vdf_snark_proof).unwrap();
+      let vdf_proof = VdfProof::new(r1, r3, s1, s3, k, vdf_proof_vector);
+      let commitment = from_hex(commitment_hex.as_str()).unwrap();
 
-      let vdf_proof_vector = hex::decode(&decryption_info.vdf_proof).unwrap();
-      let vdf_proof = groth16::Proof::<Bn256>::read(&vdf_proof_vector[..]).unwrap();
-
-      let is_verified = vdf_zkp.verify(vdf_proof, commitment.as_str(), decryption_info.two_two_t.as_str(), decryption_info.g.as_str(), decryption_info.n.as_str());
+      let is_verified = vdf_zkp.verify(commitment, vdf_proof);
       if is_verified == false {
         println!("VDF proof is invalid");
         return;
@@ -194,8 +177,14 @@ fn main() {
       }
     }
 
-    let y = vdf.evaluate(t, g, n);
-    let plain_text = decrypt(poseidon_encryption, y.as_bytes(), decryption_info);
+    let two = BigUint::from(2usize);
+    let two_t = two.pow(vdf_params.t.into());
+    let s1 = BigUint::from_str(decryption_info.s1.as_str()).unwrap();
+
+    init_big_uint_from_str!(n, vdf_params.n.as_str());
+    let y = s1.modpow(&two_t, &n);
+
+    let plain_text = decrypt(poseidon_encryption, y.to_string().as_bytes(), decryption_info);
     print!("{}", plain_text);
   } else if args.action_type == "batch_decrypt" {
     let file = File::open(args.batch_file_path).expect("Unable to read data");
@@ -205,20 +194,13 @@ fn main() {
     let mut poseidon_circuit = PoseidonCircuit::new();
     poseidon_circuit.import_parameter();
 
-    
-
     for line in reader.lines() {
       let data = line.expect("Unable to read line");
       let decryption_info: DecryptionInfo = serde_json::from_str(&data).unwrap();
       let poseidon_encryption = PoseidonEncryption::new();
-      let t = decryption_info.t.clone();
-      let g = decryption_info.g.clone();
-      let n = decryption_info.n.clone();
-      let commitment = decryption_info.commitment.clone();
+      let commitment_hex = decryption_info.commitment.clone();
 
       if args.use_thread == true {
-        let vdf_proof = decryption_info.vdf_proof.clone();
-        let two_two_t = decryption_info.two_two_t.clone();
         let encryption_proof = decryption_info.encryption_proof.clone();
         let cipher_text = decryption_info.cipher_text.clone();
         let public_parameter = poseidon_circuit.public_parameter.clone().unwrap();
@@ -226,13 +208,18 @@ fn main() {
 
         let handle = thread::spawn(move || {
           if args.use_vdf_zkp == true {
-            let mut vdf_zkp = VdfZKP::<Bn256>::new();
+            let mut vdf_zkp = VdfZKP::<Bls12>::new();
             vdf_zkp.import_parameter();
 
-            let vdf_proof_vector = hex::decode(&vdf_proof).unwrap();
-            let vdf_proof = groth16::Proof::<Bn256>::read(&vdf_proof_vector[..]).unwrap();
-
-            let is_verified = vdf_zkp.verify(vdf_proof, commitment.as_str(), two_two_t.as_str(), g.as_str(), n.as_str());
+            let r1 = decryption_info.r1.as_str();
+            let r3 = decryption_info.r3.as_str();
+            let s1 = decryption_info.s1.as_str();
+            let s3 = decryption_info.s3.as_str();
+            let k = decryption_info.k.as_str();
+            let vdf_proof_vector = hex::decode(&decryption_info.vdf_snark_proof).unwrap();
+            let vdf_proof = VdfProof::new(r1, r3, s1, s3, k, vdf_proof_vector);
+            let commitment = from_hex(commitment_hex.as_str()).unwrap();
+            let is_verified = vdf_zkp.verify(commitment, vdf_proof);
 
             if is_verified == false {
               println!("VDF proof is invalid");
@@ -261,24 +248,40 @@ fn main() {
             }
           }
 
-          let y = &vdf.evaluate(t, g, n);
-          let plain_text = decrypt(poseidon_encryption, y.as_bytes(), decryption_info);
+          let mut vdf_zkp = VdfZKP::<Bls12>::new();
+          vdf_zkp.import_parameter();
+          let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
+
+          let two = BigUint::from(2usize);
+          let two_t = two.pow(vdf_params.t.into());
+          let s1 = BigUint::from_str(decryption_info.s1.as_str()).unwrap();
+
+          init_big_uint_from_str!(n, vdf_params.n.as_str());
+          let y = s1.modpow(&two_t, &n);
+
+          let plain_text = decrypt(poseidon_encryption, y.to_string().as_bytes(), decryption_info);
           println!("{}", plain_text);
         });
 
         handles.push(handle);
       } else {
+        let mut vdf_zkp = VdfZKP::<Bls12>::new();
+        vdf_zkp.import_parameter();
+        let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
+
         let public_parameter = poseidon_circuit.public_parameter.clone().unwrap();
         let verifier_data = poseidon_circuit.verifier_data.clone().unwrap();
-        
+
         if args.use_vdf_zkp == true {
-          let mut vdf_zkp = VdfZKP::<Bn256>::new();
-          vdf_zkp.import_parameter();
-
-          let vdf_proof_vector = hex::decode(&decryption_info.vdf_proof).unwrap();
-          let vdf_proof = groth16::Proof::<Bn256>::read(&vdf_proof_vector[..]).unwrap();
-
-          let is_verified = vdf_zkp.verify(vdf_proof, commitment.as_str(), decryption_info.two_two_t.as_str(), decryption_info.g.as_str(), decryption_info.n.as_str());
+          let r1 = decryption_info.r1.as_str();
+          let r3 = decryption_info.r3.as_str();
+          let s1 = decryption_info.s1.as_str();
+          let s3 = decryption_info.s3.as_str();
+          let k = decryption_info.k.as_str();
+          let vdf_proof_vector = hex::decode(&decryption_info.vdf_snark_proof).unwrap();
+          let vdf_proof = VdfProof::new(r1, r3, s1, s3, k, vdf_proof_vector);
+          let commitment = from_hex(commitment_hex.as_str()).unwrap();
+          let is_verified = vdf_zkp.verify(commitment, vdf_proof);
 
           if is_verified == false {
             println!("VDF proof is invalid");
@@ -307,8 +310,14 @@ fn main() {
           }
         }
 
-        let y = vdf.evaluate(t, g, n);
-        let plain_text = decrypt(poseidon_encryption, y.as_bytes(), decryption_info);
+        let two = BigUint::from(2usize);
+        let two_t = two.pow(vdf_params.t.into());
+        let s1 = BigUint::from_str(decryption_info.s1.as_str()).unwrap();
+
+        init_big_uint_from_str!(n, vdf_params.n.as_str());
+        let y = s1.modpow(&two_t, &n);
+
+        let plain_text = decrypt(poseidon_encryption, y.to_string().as_bytes(), decryption_info);
         println!("{}", plain_text);
       }
     }
