@@ -29,8 +29,22 @@ macro_rules! init_big_uint_from_str {
 fn main() {
   let args = Args::parse();
   let label = b"poseidon-cipher";
+  if args.action_type == "find_symmetric_key" {
+    let mut vdf_zkp = VdfZKP::<Bls12>::new();
+    vdf_zkp.import_parameter();
+    let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
 
-  if args.action_type == "verify" {
+    let decryption_info: DecryptionInfo = serde_json::from_str(&args.data).unwrap();
+
+    let two = BigUint::from(2usize);
+    let two_t = two.pow(vdf_params.t.into());
+    let s1 = BigUint::from_str(decryption_info.s1.as_str()).unwrap();
+
+    init_big_uint_from_str!(n, vdf_params.n.as_str());
+    let symmetric_key = s1.modpow(&two_t, &n);
+    
+    print!("{}", symmetric_key.to_string());
+  } else if args.action_type == "verify" {
     let mut vdf_zkp = VdfZKP::<Bls12>::new();
     vdf_zkp.import_parameter();
 
@@ -188,50 +202,6 @@ fn main() {
 
     let decryption_info: DecryptionInfo = serde_json::from_str(&args.data).unwrap();
     let poseidon_encryption = PoseidonEncryption::new();
-    let commitment_hex = decryption_info.commitment.clone();
-
-    if args.use_vdf_zkp == true {
-      let r1 = decryption_info.r1.as_str();
-      let r3 = decryption_info.r3.as_str();
-      let s1 = decryption_info.s1.as_str();
-      let s3 = decryption_info.s3.as_str();
-      let k = decryption_info.k.as_str();
-      let vdf_proof_vector = hex::decode(&decryption_info.vdf_snark_proof).unwrap();
-      let vdf_proof = VdfProof::new(r1, r3, s1, s3, k, vdf_proof_vector);
-      let commitment = from_hex(commitment_hex.as_str()).unwrap();
-
-      let is_verified = vdf_zkp.verify(commitment, vdf_proof);
-      if is_verified == false {
-        println!("VDF proof is invalid");
-        return;
-      }
-    }
-
-    if args.use_encryption_zkp == true {
-      let proof_bytes = hex::decode(&decryption_info.encryption_proof).unwrap();
-      let proof = Proof::from_slice(&proof_bytes).unwrap();
-      let mut poseidon_circuit = PoseidonCircuit::new();
-      poseidon_circuit.import_parameter();
-
-      let public_parameter = poseidon_circuit.public_parameter.clone().unwrap();
-      let verifier_data = poseidon_circuit.verifier_data.clone().unwrap();
-
-      let mut public_input = vec![];
-      for (_, cipher_text_hex) in decryption_info.cipher_text.iter().enumerate() {
-        let chipher_text_hex_bytes = hex::decode(cipher_text_hex).unwrap().try_into().unwrap();
-        let cipher_scalar = PoseidonEncryption::from_bytes(&chipher_text_hex_bytes).unwrap();
-        cipher_scalar.iter().for_each(|c| {
-          public_input.push(PublicInputValue::from(*c));
-        });
-      }
-
-      let is_verified = PoseidonCircuit::verify(&public_parameter, &verifier_data, &proof, &public_input, label).is_ok();
-
-      if is_verified == false {
-        println!("Encryption proof is invalid");
-        return;
-      }
-    }
 
     let two = BigUint::from(2usize);
     let two_t = two.pow(vdf_params.t.into());
@@ -240,7 +210,7 @@ fn main() {
     init_big_uint_from_str!(n, vdf_params.n.as_str());
     let y = s1.modpow(&two_t, &n);
 
-    let plain_text = decrypt(poseidon_encryption, y.to_string().as_bytes(), decryption_info);
+    let plain_text = decrypt(poseidon_encryption, y.to_string(), decryption_info);
     print!("{}", plain_text);
   } else if args.action_type == "batch_decrypt" {
     let file = File::open(args.batch_file_path).expect("Unable to read data");
@@ -316,7 +286,7 @@ fn main() {
             }
           }
 
-          let plain_text = decrypt(poseidon_encryption, y.to_string().as_bytes(), decryption_info);
+          let plain_text = decrypt(poseidon_encryption, y.to_string(), decryption_info);
           println!("{}", plain_text);
         });
 
@@ -363,7 +333,7 @@ fn main() {
           }
         }
 
-        let plain_text = decrypt(poseidon_encryption, y.to_string().as_bytes(), decryption_info);
+        let plain_text = decrypt(poseidon_encryption, y.to_string(), decryption_info);
         println!("{}", plain_text);
       }
     }
@@ -374,9 +344,9 @@ fn main() {
   }
 }
 
-fn decrypt(poseidon_encryption: PoseidonEncryption, y: &[u8], decryption_info: DecryptionInfo) -> String {
+fn decrypt(poseidon_encryption: PoseidonEncryption, y: String, decryption_info: DecryptionInfo) -> String {
   // Generate symmetric key
-  let symmetric_key = PoseidonEncryption::calculate_secret_key(&y);
+  let symmetric_key = PoseidonEncryption::calculate_secret_key(&y.as_bytes());
 
   // Decrypt message with symmetric key
   let mut message = poseidon_encryption.decrypt(decryption_info.cipher_text, &symmetric_key, decryption_info.nonce);
