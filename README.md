@@ -17,18 +17,24 @@
 
    `./script/encrypt.sh`
 
-### 2. Decryption (single)
+### 2. Verification
 
-1. Modify decryption script option (position: ./script/decrypt.sh)
+1. Modify verification script option (position: ./script/verify.sh)
 
    --use-vdf-zkp `true/false`
    --use-encryption-zkp `true/false`
 
 2. Run script
 
+   `./script/encrypt.sh`
+
+### 3. Decryption (single)
+
+1. Run script
+
    `./script/decrypt.sh`
 
-### 2. Decryption (batch)
+### 4. Decryption (batch)
 
 1. Make `batch_decryption_info.data`
    `cp ./script/data/batch_decryption_info_example.data ./script/data/batch_decryption_info.data`

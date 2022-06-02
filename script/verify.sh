@@ -12,6 +12,7 @@ echo "- Use encryption zkp: $use_encryption_zkp"
 
 beginTime=$(date +%s%N)
 
+echo "$SCRIPTPATH/../target/debug/crypto_cli --use-vdf-zkp $use_vdf_zkp --use-encryption-zkp $use_encryption_zkp --action-type verify --data "$data" > $SCRIPTPATH/data/result.txt"
 $SCRIPTPATH/../target/debug/crypto_cli --use-vdf-zkp $use_vdf_zkp --use-encryption-zkp $use_encryption_zkp --action-type verify --data "$data" > $SCRIPTPATH/data/result.txt
 
 endTime=$(date +%s%N) 
