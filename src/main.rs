@@ -10,31 +10,27 @@ use encryptor::PoseidonEncryption;
 use encryptor_zkp::PoseidonCircuit;
 use info_types::{DecryptionInfo, EncryptionInfo};
 use sapling_crypto::bellman::pairing::bls12_381::Bls12;
-use sapling_crypto::bellman::pairing::ff::from_hex;
-use sapling_crypto::bellman::pairing::ff::to_hex;
-use sapling_crypto::bellman::pairing::ff::ScalarEngine;
+use sapling_crypto::bellman::pairing::ff::{from_hex, to_hex, ScalarEngine};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::thread;
-use vdf_zkp::mimc;
-use vdf_zkp::{nat_to_f, VdfProof, VdfZKP};
-use vdf_zkp::group::{RsaGroup, SemiGroup};
-
-macro_rules! init_big_uint_from_str {
-  ($var:ident, $val:expr) => {
-    let $var = BigUint::from_str($val).unwrap();
-  };
-}
+use vdf_zkp::{
+  init_big_uint_from_str,
+  group::{RsaGroup, SemiGroup},
+  mimc, nat_to_f, VdfProof, VdfZKP,
+};
 
 fn get_symmetric_key(g: BigUint) -> String {
   let mut vdf_zkp = VdfZKP::<Bls12>::new();
   vdf_zkp.import_parameter();
 
   let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
+
   let two = BigUint::from(2usize);
   let two_t = two.pow(vdf_params.t.into());
+
   init_big_uint_from_str!(n, vdf_params.n.as_str());
-  
+
   g.modpow(&two_t, &n).to_string()
 }
 
@@ -67,7 +63,6 @@ fn main() {
       let commitment = from_hex(commitment_hex.as_str()).unwrap();
 
       let is_verified = vdf_zkp.verify(commitment, vdf_proof);
-
       if is_verified == false {
         print!("false");
         return;
@@ -100,7 +95,6 @@ fn main() {
         return;
       }
     }
-
     print!("true");
   } else if args.action_type == "encrypt" {
     let mut vdf_zkp = VdfZKP::<Bls12>::new();
@@ -185,7 +179,10 @@ fn main() {
         message_length, nonce, commitment_hex, cipher_text_hexes, s1, encryption_proof_hex
       );
     } else {
-      println!("{{\"message_length\": {}, \"nonce\": \"{:?}\", \"cipher_text\": {:?}, \"s1\": {:?}}}", message_length, nonce, cipher_text_hexes, s1);
+      println!(
+        "{{\"message_length\": {}, \"nonce\": \"{:?}\", \"cipher_text\": {:?}, \"s1\": {:?}}}",
+        message_length, nonce, cipher_text_hexes, s1
+      );
     }
   } else if args.action_type == "decrypt" {
     let decryption_info: DecryptionInfo = serde_json::from_str(&args.data).unwrap();
@@ -202,6 +199,7 @@ fn main() {
     let reader = BufReader::new(file);
     let mut handles = Vec::new();
 
+    let mut index = 0;
     for line in reader.lines() {
       let data = line.expect("Unable to read line");
 
@@ -212,16 +210,19 @@ fn main() {
       let symmetric_key = get_symmetric_key(s1);
 
       if args.use_thread == true {
+        let j = index;
         let handle = thread::spawn(move || {
           let plain_text = decrypt(poseidon_encryption, symmetric_key, decryption_info);
-          println!("{}", plain_text);
+          println!("{}/{}", j, plain_text);
         });
 
         handles.push(handle);
       } else {
+        let j = index;
         let plain_text = decrypt(poseidon_encryption, symmetric_key, decryption_info);
-        println!("{}", plain_text);
+        println!("{}/{}", j, plain_text);
       }
+      index = index + 1;
     }
 
     for handle in handles {
