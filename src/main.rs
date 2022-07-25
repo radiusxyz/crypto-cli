@@ -266,8 +266,8 @@ fn main() {
     vdf_proof_hex = hex::encode(vdf_proof_vector.clone());
 
     println!(
-      "{{ \"commitment\": {:?}, \"r1\": {:?}, \"r3\": {:?}, \"s1\": {:?}, \"s3\": {:?}, \"k\": {:?}, \"vdf_snark_proof\": {:?} }}",
-      commitment_hex, r1, r3, s1, s3, k, vdf_proof_hex,
+      "{{ \"symmetric_key\": {:?}, \"commitment\": {:?}, \"r1\": {:?}, \"r3\": {:?}, \"s1\": {:?}, \"s3\": {:?}, \"k\": {:?}, \"vdf_snark_proof\": {:?} }}",
+      s.to_string(), commitment_hex, r1, r3, s1, s3, k, vdf_proof_hex,
     );
   }
 }
