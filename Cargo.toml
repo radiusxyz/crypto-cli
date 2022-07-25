@@ -19,7 +19,12 @@ sapling-crypto = { package = "sapling-crypto_ce", git = "https://github.com/matt
 encryptor = { git = "https://github.com/radiusxyz/encryptor" }
 encryptor_zkp = { package = "encryptor_zkp", git = "https://github.com/radiusxyz/encryptor-zkp" }
 
-vdf = { git = "https://github.com/radiusxyz/vdf" }
-vdf_zkp = { package = "vdf_zkp", git = "https://github.com/radiusxyz/vdf-zkp" }
+# encryptor = { path = "../encryptor" }
+# encryptor_zkp = { package = "encryptor_zkp", path = "../encryptor-zkp" }
+
+vdf_zkp = { package = "vdf_zkp", path = "../vdf-zkp" }
+
+# vdf = { git = "https://github.com/radiusxyz/vdf" }
+# vdf_zkp = { package = "vdf_zkp", git = "https://github.com/radiusxyz/vdf-zkp" }
 
 fastrand = "1.7.0"

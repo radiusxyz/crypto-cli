@@ -414,7 +414,6 @@ dependencies = [
  "sapling-crypto_ce",
  "serde",
  "serde_json",
- "vdf",
  "vdf_zkp",
 ]
 
@@ -751,16 +750,6 @@ dependencies = [
  "cfg-if 1.0.0",
  "libc",
  "wasi",
-]
-
-[[package]]
-name = "gmp-mpfr-sys"
-version = "1.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3d00b0ef965511028498a1668c4a6ef9b0b2501a4a5ab26fb8156408869306e"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -1394,27 +1383,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "957e51f3646910546462e67d5f7599b9e4fb8acdd304b087a6494730f9eebf04"
 
 [[package]]
-name = "vdf"
-version = "0.1.0"
-source = "git+https://github.com/radiusxyz/vdf#a3372db3d5ab6c6918bb1c5949c8734e870317f3"
-dependencies = [
- "gmp-mpfr-sys",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "vdf_zkp"
 version = "0.1.0"
-source = "git+https://github.com/radiusxyz/vdf-zkp#30827c3443aa6ba6d2d706871c34f4cd41055305"
 dependencies = [
  "bls12_381",
+ "fastrand",
  "hex",
  "lazy_static",
  "num-bigint 0.4.3",
  "num-traits",
  "rand 0.4.6",
  "sapling-crypto_ce",
+ "serde",
+ "serde_json",
  "time",
 ]
 

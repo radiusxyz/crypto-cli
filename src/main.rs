@@ -69,6 +69,7 @@ fn main() {
       }
     }
 
+  
     if args.use_encryption_zkp == true {
       let proof_bytes = hex::decode(&decryption_info.encryption_proof).unwrap();
       let proof = Proof::from_slice(&proof_bytes).unwrap();
@@ -88,13 +89,14 @@ fn main() {
           public_input.push(PublicInputValue::from(*c));
         });
       }
-
+ 
       let is_verified = PoseidonCircuit::verify(&public_parameter, &verifier_data, &proof, &public_input, label).is_ok();
       if is_verified == false {
         print!("false");
         return;
       }
     }
+
     print!("true");
   } else if args.action_type == "encrypt" {
     let mut vdf_zkp = VdfZKP::<Bls12>::new();
@@ -146,7 +148,8 @@ fn main() {
       vdf_proof_hex = hex::encode(vdf_proof_vector.clone());
     }
 
-    let mut encryption_proof_hex = "".to_string();
+    let encryption_proof_hex = "".to_string();
+    /*
     if args.use_encryption_zkp == true {
       let mut poseidon_circuit = PoseidonCircuit::new();
       poseidon_circuit.import_parameter();
@@ -162,7 +165,7 @@ fn main() {
       let proof = poseidon_circuit.prove(&public_parameter, &prover_key, label).unwrap();
       encryption_proof_hex = hex::encode(proof.to_bytes());
     }
-
+ */
     if args.use_vdf_zkp == true && args.use_encryption_zkp == true {
       println!(
         "{{ \"message_length\": {}, \"nonce\": \"{:?}\", \"commitment\": {:?}, \"cipher_text\": {:?}, \"r1\": {:?}, \"r3\": {:?}, \"s1\": {:?}, \"s3\": {:?}, \"k\": {:?}, \"vdf_snark_proof\": {:?}, \"encryption_proof\": {:?} }}",
@@ -228,6 +231,44 @@ fn main() {
     for handle in handles {
       handle.join().unwrap();
     }
+  } else if args.action_type == "get_vdf_zkp" {
+    let mut vdf_zkp = VdfZKP::<Bls12>::new();
+    vdf_zkp.import_parameter();
+    let vdf_params = vdf_zkp.clone().vdf_params.unwrap();
+
+    init_big_uint_from_str!(g_two_t, vdf_params.g_two_t.as_str());
+    init_big_uint_from_str!(g, vdf_params.g.as_str());
+    init_big_uint_from_str!(base, vdf_params.base.as_str());
+    init_big_uint_from_str!(n, vdf_params.n.as_str());
+
+    let s: u128 = fastrand::u128(..);
+    let s = BigUint::from(s);
+    let s2 = g_two_t.modpow(&s, &n);
+    let s2_field = nat_to_f::<<Bls12 as ScalarEngine>::Fr>(&s2).unwrap();
+    let commitment = mimc::helper::mimc(&[s2_field.clone(), s2_field.clone()]);
+    let commitment_hex = to_hex(&commitment);
+
+    let rsa_g = RsaGroup { n: n.clone(), g: base.clone() };
+    let s1 = rsa_g.power(&g, &s);
+
+    let mut vdf_proof_hex = "".to_string();
+    let s1 = s1.to_string();      
+
+    let vdf_proof = vdf_zkp.generate_proof(commitment, s.to_string().as_str());
+
+    let r1 = vdf_proof.sigma_proof.r1.to_string();
+    let r3 = vdf_proof.sigma_proof.r3.to_string();
+    let s3 = vdf_proof.sigma_proof.s3.to_string();
+    let k = vdf_proof.sigma_proof.k.to_string();
+
+    let mut vdf_proof_vector = vec![];
+    vdf_proof.snark_proof.write(&mut vdf_proof_vector).unwrap();
+    vdf_proof_hex = hex::encode(vdf_proof_vector.clone());
+
+    println!(
+      "{{ \"commitment\": {:?}, \"r1\": {:?}, \"r3\": {:?}, \"s1\": {:?}, \"s3\": {:?}, \"k\": {:?}, \"vdf_snark_proof\": {:?} }}",
+      commitment_hex, r1, r3, s1, s3, k, vdf_proof_hex,
+    );
   }
 }
 
